@@ -1,82 +1,138 @@
-from pymongo import MongoClient  
-from pymongo.encryption import ClientEncryption, Algorithm  
+import os  
+from pymongo import MongoClient, errors  
+from pymongo.encryption import ClientEncryption  
 from pymongo.encryption_options import AutoEncryptionOpts  
+from bson import json_util  
 from bson.codec_options import CodecOptions  
 from bson.binary import STANDARD  
-import os  
+from bson import Binary, UUID_SUBTYPE  
+from datetime import datetime  
   
-# Connection string to your MongoDB instance  
-connection_string = ""  
+# ---------------------------  
+# Configuration Parameters  
+# ---------------------------  
   
-# Namespace for the key vault (database and collection)  
-key_vault_namespace = "encryption.__keyVault"  
+# Define a hardcoded local master key (96 bytes)  
+# In production, securely manage your master key  
+local_master_key = bytes.fromhex(  
+    "a1b2c3d4e5f60718293a4b5c6d7e8f90" * 6  
+)  
   
-# Generate a 96-byte local master key (must be kept secure in production)  
-local_master_key = os.urandom(96)  
-  
-# Define KMS providers  
+# KMS Provider Configuration  
 kms_providers = {  
-    "local": {  
-        "key": local_master_key  
-    }  
+    "local": {"key": local_master_key}  
 }  
   
-# Create a MongoClient without encryption options  
-client = MongoClient(connection_string)  
+# Key Vault Namespace  
+key_vault_namespace = "encryption.__keyVault"  
   
-# Get references to the key vault collection  
-key_vault_db, key_vault_coll = key_vault_namespace.split(".", 1)  
-key_vault = client[key_vault_db][key_vault_coll]  
+# MongoDB Connection String  
+connection_string = ""  
   
-# Ensure the key vault collection has a unique index on keyAltNames  
-key_vault.create_index(  
-    "keyAltNames",  
-    unique=True,  
-    partialFilterExpression={"keyAltNames": {"$exists": True}}  
-)  
+# Data Encryption Key (DEK) Key Alt Name  
+key_alt_name = "csfle_demo_data_key"  
   
-# Import CodecOptions and set UUID representation to STANDARD  
-codec_options = CodecOptions(uuid_representation=STANDARD)  
+# ---------------------------  
+# Setup and Initialization  
+# ---------------------------  
   
-# Create a ClientEncryption instance  
-client_encryption = ClientEncryption(  
-    kms_providers=kms_providers,  
-    key_vault_namespace=key_vault_namespace,  
-    key_vault_client=client,  
-    codec_options=codec_options  
-)  
+# Create a MongoDB client for the key vault (without encryption)  
+key_vault_client = MongoClient(connection_string)  
   
-# Check if a DEK with the keyAltName "memories-data-key" already exists  
-dek_alt_name = "memories-data-key"  
-existing_dek = key_vault.find_one({"keyAltNames": dek_alt_name})  
+# Access the key vault collection  
+key_vault_coll = key_vault_client.get_database(  
+    key_vault_namespace.split(".")[0]  
+).get_collection(key_vault_namespace.split(".")[1])  
   
-if existing_dek:  
-    # Use the existing DEK  
-    data_key_id = existing_dek["_id"]  
-    print(f"Using existing data key with ID: {data_key_id}")  
-else:  
-    # Create a new DEK  
-    data_key_id = client_encryption.create_data_key(  
-        "local",  
-        key_alt_names=[dek_alt_name]  
+# Ensure a unique index on keyAltNames in the key vault collection  
+try:  
+    key_vault_coll.create_index(  
+        "keyAltNames",  
+        unique=True,  
+        partialFilterExpression={"keyAltNames": {"$exists": True}},  
+        name="keyAltNames_1"  
     )  
-    print(f"Created new data key with ID: {data_key_id}")  
+except errors.OperationFailure as e:  
+    if 'already exists' in str(e):  
+        pass  # Index already exists; do nothing  
+    else:  
+        raise  # Re-raise other exceptions  
   
-# Define the encrypted fields map  
+# ---------------------------  
+# Data Encryption Key (DEK)  
+# ---------------------------  
+  
+# Check if a DEK with the specified keyAltName already exists  
+existing_key = key_vault_coll.find_one({"keyAltNames": key_alt_name})  
+  
+if existing_key:  
+    # Use the existing key  
+    data_key_id = existing_key["_id"]  
+    print(f"Using existing data key with _id: {data_key_id}")  
+else:  
+    # Create a new data encryption key (DEK)  
+    client_encryption = ClientEncryption(  
+        kms_providers,  
+        key_vault_namespace,  
+        key_vault_client,  
+        CodecOptions(uuid_representation=STANDARD),  
+    )  
+    try:  
+        data_key_id = client_encryption.create_data_key(  
+            "local", key_alt_names=[key_alt_name]  
+        )  
+        print(f"Created new data key with _id: {data_key_id}")  
+    except errors.DuplicateKeyError:  
+        # Retrieve the existing key if another process created it  
+        existing_key = key_vault_coll.find_one({"keyAltNames": key_alt_name})  
+        if existing_key:  
+            data_key_id = existing_key["_id"]  
+            print(f"Key was created by another process. Using data key with _id: {data_key_id}")  
+        else:  
+            raise  # Re-raise exception if key still doesn't exist  
+    finally:  
+        client_encryption.close()  
+  
+# ---------------------------  
+# Encrypted Fields Map  
+# ---------------------------  
+  
+# Encrypted Fields Map with Queryable Encryption  
 encrypted_fields_map = {  
-    "users.memories": {  
+    "csfle_demo.memories": {  
+        "escCollection": "enxcol_.memories.esc",  
+        "ecocCollection": "enxcol_.memories.ecoc",  
         "fields": [  
             {  
+                "path": "email",  
+                "bsonType": "string",  
                 "keyId": data_key_id,  
+                "queries": {"queryType": "equality"},  
+            },  
+            {  
                 "path": "memory",  
                 "bsonType": "string",  
-                "queries": {"queryType": "equality"}  
-            }  
+                "keyId": data_key_id,  
+            },  
+            {  
+                "path": "preferences",  
+                "bsonType": "object",  
+                "keyId": data_key_id,  
+            },  
+            {  
+                "path": "password",  
+                "bsonType": "string",  
+                "keyId": data_key_id,  
+            },  
         ]  
     }  
 }  
   
-# Set up automatic encryption options  
+# ---------------------------  
+# Encrypted MongoDB Client  
+# ---------------------------  
+  
+# Configure auto-encryption  
 auto_encryption_opts = AutoEncryptionOpts(  
     kms_providers=kms_providers,  
     key_vault_namespace=key_vault_namespace,  
@@ -89,42 +145,74 @@ encrypted_client = MongoClient(
     auto_encryption_opts=auto_encryption_opts  
 )  
   
-# Get a reference to the encrypted collection  
-db = encrypted_client["users"]  
-collection = db["memories"]  
+# Access the database and collection  
+db = encrypted_client.get_database("csfle_demo")  
+collection = db.get_collection("memories")  
   
-# Drop the collection if it exists (for demonstration purposes)  
-collection.drop()  
+# ---------------------------  
+# Create Encrypted Collection  
+# ---------------------------  
   
-# Sample document to insert  
-document = {  
+# Create the encrypted collection if it doesn't exist  
+try:  
+    db.create_collection(  
+        "memories",  
+        encrypted_fields=encrypted_fields_map["csfle_demo.memories"]  
+    )  
+    print("Encrypted collection 'memories' created.")  
+except errors.CollectionInvalid:  
+    # Collection already exists  
+    print("Encrypted collection 'memories' already exists.")  
+  
+# ---------------------------  
+# Insert Sample Data  
+# ---------------------------  
+  
+# Sample memory data  
+memory_document = {  
     "email": "user@example.com",  
-    "memory": "I remember visiting the Grand Canyon last summer.",  
-    "timestamp": "2023-10-01T12:00:00Z"  
+    "memory": "Today I chatted with the assistant about Queryable Encryption.",  
+    "preferences": {  
+        "theme": "dark",  
+        "notifications": True  
+    },  
+    "password": "super_secret_password",  
+    "timestamp": datetime.utcnow()  
 }  
   
-# Insert the document  
-insert_result = collection.insert_one(document)  
-print(f"Inserted document with ID: {insert_result.inserted_id}")  
+# Insert the memory document  
+try:  
+    result = collection.insert_one(memory_document)  
+    print(f"Inserted memory document with _id: {result.inserted_id}")  
+except errors.DuplicateKeyError:  
+    print("Memory document already exists.")  
   
-# Retrieve the document  
+# ---------------------------  
+# Retrieve and Display Data  
+# ---------------------------  
+  
+# Retrieve the memory document  
 retrieved_doc = collection.find_one({"email": "user@example.com"})  
-print("Retrieved document:")  
-print(retrieved_doc)  
   
-# Create an unencrypted client  
-unencrypted_client = MongoClient(connection_string)  
+print("\nRetrieved Memory Document (Decrypted):")  
+print(json_util.dumps(retrieved_doc, indent=2))  
   
-# Access the collection without encryption  
-unencrypted_collection = unencrypted_client["users"]["memories"]  
+# The 'email', 'memory', 'preferences', and 'password' fields are automatically decrypted  
   
-# Retrieve the raw document  
-raw_doc = unencrypted_collection.find_one({"email": "user@example.com"})  
-print("Raw document retrieved without decryption:")  
-print(raw_doc)  
+# ---------------------------  
+# Query on Encrypted Field  
+# ---------------------------  
   
-# Close the clients  
+# Attempt to find the document using an encrypted field (email)  
+query = {"email": "user@example.com"}  
+queried_doc = collection.find_one(query)  
+  
+print("\nQueried Document by Encrypted Field (Decrypted):")  
+print(json_util.dumps(queried_doc, indent=2))  
+  
+# ---------------------------  
+# Close Clients  
+# ---------------------------  
+  
 encrypted_client.close()  
-client_encryption.close()  
-client.close()  
-unencrypted_client.close()  
+key_vault_client.close()  
