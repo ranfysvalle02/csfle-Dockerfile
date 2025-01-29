@@ -41,11 +41,14 @@ key_vault.create_index(
 # Data Encryption Key (DEK) Setup  
   
 # Check if a DEK with the specified key_alt_names exists  
-key_alt_name = "demo-data-key"  
-existing_key = key_vault.find_one({"keyAltNames": key_alt_name})  
-  
-if existing_key:  
-    data_key_id = existing_key["_id"]  
+key_alt_name1 = "demo-data-key1"  
+existing_key1 = key_vault.find_one({"keyAltNames": key_alt_name1})  
+key_alt_name2 = "demo-data-key2"  
+existing_key2 = key_vault.find_one({"keyAltNames": key_alt_name2})
+
+if existing_key1 and existing_key2:  
+    data_key_id1 = existing_key1["_id"]  
+    data_key_id2 = existing_key2["_id"]  
     print("Using existing Data Encryption Key.")  
 else:  
     # Create a new DEK  
@@ -55,8 +58,11 @@ else:
         regular_client,  
         CodecOptions(uuid_representation=STANDARD),  
     )  
-    data_key_id = client_encryption.create_data_key(  
-        "local", key_alt_names=[key_alt_name]  # Corrected parameter name  
+    data_key_id1 = client_encryption.create_data_key(  
+        "local", key_alt_names=[key_alt_name1]    
+    ) 
+    data_key_id2 = client_encryption.create_data_key(  
+        "local", key_alt_names=[key_alt_name2]    
     )  
     client_encryption.close()  
     print("Created new Data Encryption Key.")  
@@ -67,11 +73,16 @@ encrypted_fields_map = {
     "test.coll": {  
         "fields": [  
             {  
-                "path": "secretField",  
+                "path": "email",  
                 "bsonType": "string",  
-                "keyId": data_key_id,  
+                "keyId": data_key_id1,  
                 "queries": {"queryType": "equality"},  
-            }  
+            },
+            {
+                "path": "memory",
+                "bsonType": "string",
+                "keyId": data_key_id2,
+            },
         ]  
     }  
 }  
@@ -103,19 +114,24 @@ try:
 except errors.CollectionInvalid:  
     # Collection already exists  
     pass  
-  
-# Insert a document with an encrypted field  
-doc = {"_id": 1, "secretField": "mySecretData"}  
+
+doc1 = {"_id": 1, "email": "demo@demo.com", "memory": """
+Unintentionally accessed a confidential email outlining the company's plans to...
+"""}
+doc2 = {"_id": 2, "email": "demo@demo.com", "memory": """
+`abc123` is the password for the company's email.
+"""}  
   
 try:  
-    collection.insert_one(doc)  
+    collection.insert_one(doc1)
+    collection.insert_one(doc2)  
     print("Inserted document into encrypted collection.")  
 except errors.DuplicateKeyError:  
     # Document already exists  
     pass  
   
 # Query the document using the encrypted field  
-query_result = collection.find_one({"secretField": "mySecretData"})  
+query_result = collection.find({"email": "demo@demo.com"})  
   
 print("\nQueried Document:")  
 print(json_util.dumps(query_result, indent=2))  
