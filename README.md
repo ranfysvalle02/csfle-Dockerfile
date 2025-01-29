@@ -2,6 +2,8 @@
 
 ---
 
-docker buildx build --platform linux/amd64 -t csfle-demo . 
+`docker build -t <image-name> .`
 
-docker run -it --rm csfle-demo bash     
+---
+
+`docker run -it --rm <image-name>`
