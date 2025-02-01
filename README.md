@@ -6,7 +6,7 @@
 
 # Enhancing Data Security with Queryable Encryption  
    
-With the increasing amount of sensitive information stored and processed by applications and "agents", ensuring that data remains confidential and secure is a top priority. One of the cutting-edge solutions to this challenge is **queryable encryption**. In this blog post, we'll explore what queryable encryption is, how it enhances privacy and security, and how you can implement it using MongoDB. We'll also touch upon the concept of envelope encryption to give you a comprehensive understanding of modern encryption practices.  
+With the increasing amount of sensitive information stored and processed by applications and "agents", ensuring that data remains confidential and secure is a top priority. One of the cutting-edge solutions to this challenge is **queryable encryption**. In this post, we'll explore what queryable encryption is, how it enhances privacy and security, and how you can implement it using MongoDB. We'll also touch upon the concept of envelope encryption to give you a comprehensive understanding of modern encryption practices.  
    
 ---  
    
