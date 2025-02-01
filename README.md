@@ -1,5 +1,7 @@
 # qe-Dockerfile
 
+![](QE-how-it-works.png)
+
 ---
 
 # Enhancing Data Security with Queryable Encryption  
