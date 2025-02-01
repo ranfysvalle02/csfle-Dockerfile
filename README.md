@@ -44,9 +44,7 @@ By separating the encryption keys, you can securely manage and rotate keys witho
 ---  
    
 ## Implementing Queryable Encryption with MongoDB  
-   
-MongoDB provides a powerful and flexible way to implement queryable encryption through client-side field-level encryption. Let's walk through how to set this up using Python and PyMongo.  
-   
+      
 ### Prerequisites  
    
 ### 1. Setting Up the Environment  
